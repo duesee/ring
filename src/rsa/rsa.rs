@@ -19,6 +19,8 @@ use untrusted;
 
 mod padding;
 
+pub const RSA_KEY_MAX_BITS: usize = 4096;
+
 // `RSA_PKCS1_SHA1` is intentionally not exposed.
 pub use self::padding::{RSA_PKCS1_SHA256, RSA_PKCS1_SHA384, RSA_PKCS1_SHA512};
 
@@ -123,6 +125,12 @@ extern {
     fn GFp_BN_MONT_CTX_free(mont: *mut BN_MONT_CTX);
 }
 
+mod blinding;
+
+// Really a private method; only has public visibility so that C compilation
+// can see it.
+#[doc(hidden)]
+pub use rsa::blinding::GFp_rand_mod;
 
 #[cfg(test)]
 mod tests {

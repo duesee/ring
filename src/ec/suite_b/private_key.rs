@@ -38,7 +38,7 @@ pub fn generate_private_key(ops: &PrivateKeyOps, rng: &rand::SecureRandom)
     // and switch to the other mechanism.
 
     let num_limbs = ops.common.num_limbs;
-    let range = Range::from_max_exclusive(&ops.common.n.limbs[..num_limbs]);
+    let max_exclusive =  &ops.common.n.limbs[..num_limbs];
 
     // XXX: The value 100 was chosen to match OpenSSL due to uncertainty of
     // what specific value would be better, but it seems bad to try 100 times.
@@ -71,7 +71,7 @@ pub fn generate_private_key(ops: &PrivateKeyOps, rng: &rand::SecureRandom)
         // other than being less error prone w.r.t. accidentally generating
         // zero-valued keys.
         let scalar = private_key_as_scalar_(ops, &candidate_private_key);
-        if !range.are_limbs_within(&scalar.limbs[..num_limbs]) {
+        if !are_limbs_within_range(&scalar.limbs[..num_limbs], max_exclusive) {
             continue;
         }
 
@@ -93,10 +93,10 @@ pub fn generate_private_key(ops: &PrivateKeyOps, rng: &rand::SecureRandom)
 pub fn private_key_as_scalar(ops: &PrivateKeyOps,
                              private_key: &ec::PrivateKey) -> Scalar {
     let num_limbs = ops.common.num_limbs;
-    let range = Range::from_max_exclusive(&ops.common.n.limbs[..num_limbs]);
+    let max_exclusive = &ops.common.n.limbs[..num_limbs];
 
     let r = private_key_as_scalar_(ops, private_key);
-    assert!(range.are_limbs_within(&r.limbs[..num_limbs]));
+    assert!(are_limbs_within_range(&r.limbs[..num_limbs], max_exclusive));
     r
 }
 
@@ -116,6 +116,13 @@ fn private_key_as_scalar_(ops: &PrivateKeyOps, private_key: &ec::PrivateKey)
         limbs[i] = limb;
     }
     Scalar::from_limbs_unchecked(&limbs)
+}
+
+// Are limbs within (0, max_exclusive)?
+fn are_limbs_within_range(limbs: &[Limb], max_exclusive: &[Limb]) -> bool {
+    let eq_zero = limbs_are_zero_constant_time(limbs);
+    let lt_bound = limbs_less_than_limbs_constant_time(limbs, max_exclusive);
+    eq_zero == LimbMask::False && lt_bound == LimbMask::True
 }
 
 pub fn public_from_private(ops: &PrivateKeyOps, public_out: &mut [u8],

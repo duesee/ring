@@ -120,6 +120,7 @@ pub mod aead;
 
 pub mod agreement;
 mod c;
+pub mod chacha;
 pub mod constant_time;
 
 #[doc(hidden)]

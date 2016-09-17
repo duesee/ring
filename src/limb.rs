@@ -47,21 +47,25 @@ pub enum LimbMask {
 pub const LIMB_BYTES: usize = (LIMB_BITS + 7) / 8;
 
 #[cfg(all(test, target_pointer_width = "64"))]
+#[inline]
 pub fn limbs_as_bytes<'a>(src: &'a [Limb]) -> &'a [u8] {
     polyfill::slice::u64_as_u8(src)
 }
 
 #[cfg(target_pointer_width = "64")]
+#[inline]
 pub fn limbs_as_bytes_mut<'a>(src: &'a mut [Limb]) -> &'a mut [u8] {
     polyfill::slice::u64_as_u8_mut(src)
 }
 
 #[cfg(all(test, target_pointer_width = "32"))]
+#[inline]
 pub fn limbs_as_bytes<'a>(src: &'a [Limb]) -> &'a [u8] {
     polyfill::slice::u32_as_u8(src)
 }
 
 #[cfg(target_pointer_width = "32")]
+#[inline]
 pub fn limbs_as_bytes_mut<'a>(src: &'a mut [Limb]) -> &'a mut [u8] {
     polyfill::slice::u32_as_u8_mut(src)
 }
@@ -81,6 +85,7 @@ pub fn limbs_are_zero_constant_time(limbs: &[Limb]) -> LimbMask {
 
 /// Equivalent to `if (r >= m) { r -= m; }`
 #[allow(unsafe_code)]
+#[inline]
 pub fn limbs_reduce_once_constant_time(r: &mut [Limb], m: &[Limb]) {
     assert_eq!(r.len(), m.len());
     unsafe {

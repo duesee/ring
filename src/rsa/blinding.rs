@@ -21,7 +21,7 @@ use limb::*;
 const RSA_KEY_MAX_LIMBS: usize = rsa::RSA_PUBLIC_KEY_MODULUS_BITS_MAX / LIMB_BITS;
 
 /// Params which specify the implementation strategy for random sampling from
-/// an interval (0, max].
+/// an interval (0, max).
 struct SamplingParams {
     // We generate random data to fill a slice of limbs, so if we want a number
     // of bits which isn't a multiple of LIMB_BITS, we need to mask off some
@@ -75,9 +75,9 @@ struct SamplingParams {
 /// References a positive integer range `[1..max_exclusive)`.
 /// `max_exclusive` is assumed to be public, not secret.
 //
-// TODO(DJ) Part of this code can potentially be pulled back into `super::limb`
-// and shared with EC key generation, without unnecessarily complicating that,
-// once specialization is stabilized.
+// TODO(djudd) Part of this code can potentially be pulled back into
+// `super::limb` and shared with EC key generation, without unnecessarily
+// complicating that, once specialization is stabilized.
 struct Range<'a> {
     max_exclusive: &'a [Limb],
     sampling_params: &'a SamplingParams,
@@ -133,7 +133,7 @@ impl <'a> Range<'a> {
             }
 
             if self.sampling_params.reduce_when_over_bound {
-                // `dest` is not in (0, max] but maybe we can fix that.
+                // `dest` is not in (0, max) but maybe we can fix that.
                 // (See above for explanation of why this is safe.)
 
                 limbs_reduce_once_constant_time(dest, self.max_exclusive);

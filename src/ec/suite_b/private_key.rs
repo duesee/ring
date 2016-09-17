@@ -71,7 +71,7 @@ pub fn generate_private_key(ops: &PrivateKeyOps, rng: &rand::SecureRandom)
         // other than being less error prone w.r.t. accidentally generating
         // zero-valued keys.
         let scalar = private_key_as_scalar_(ops, &candidate_private_key);
-        if !are_limbs_within_range(&scalar.limbs[..num_limbs], max_exclusive) {
+        if !is_scalar_within_range(&scalar, max_exclusive) {
             continue;
         }
 
@@ -96,7 +96,7 @@ pub fn private_key_as_scalar(ops: &PrivateKeyOps,
     let max_exclusive = &ops.common.n.limbs[..num_limbs];
 
     let r = private_key_as_scalar_(ops, private_key);
-    assert!(are_limbs_within_range(&r.limbs[..num_limbs], max_exclusive));
+    assert!(is_scalar_within_range(&r, max_exclusive));
     r
 }
 
@@ -118,8 +118,9 @@ fn private_key_as_scalar_(ops: &PrivateKeyOps, private_key: &ec::PrivateKey)
     Scalar::from_limbs_unchecked(&limbs)
 }
 
-// Are limbs within (0, max_exclusive)?
-fn are_limbs_within_range(limbs: &[Limb], max_exclusive: &[Limb]) -> bool {
+// Is scalar within (0, max_exclusive)?
+fn is_scalar_within_range(scalar: &Scalar, max_exclusive: &[Limb]) -> bool {
+    let limbs = &scalar.limbs[..max_exclusive.len()];
     let eq_zero = limbs_are_zero_constant_time(limbs);
     let lt_bound = limbs_less_than_limbs_constant_time(limbs, max_exclusive);
     eq_zero == LimbMask::False && lt_bound == LimbMask::True

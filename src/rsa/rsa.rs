@@ -19,7 +19,7 @@ use untrusted;
 
 mod padding;
 
-pub const RSA_KEY_MAX_BITS: usize = 4096;
+pub const RSA_PUBLIC_KEY_MODULUS_BITS_MAX: usize = 4096;
 
 // `RSA_PKCS1_SHA1` is intentionally not exposed.
 pub use self::padding::{RSA_PKCS1_SHA256, RSA_PKCS1_SHA384, RSA_PKCS1_SHA512};

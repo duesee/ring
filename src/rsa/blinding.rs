@@ -18,7 +18,7 @@
 use {c, core, rand, error, rsa};
 use limb::*;
 
-const RSA_KEY_MAX_LIMBS: usize = rsa::RSA_KEY_MAX_BITS / LIMB_BITS;
+const RSA_KEY_MAX_LIMBS: usize = rsa::RSA_PUBLIC_KEY_MODULUS_BITS_MAX / LIMB_BITS;
 
 /// Params which specify the implementation strategy for random sampling from
 /// an interval (0, max].

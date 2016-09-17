@@ -12,12 +12,8 @@
 // OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
 // CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
-use {aead, c, chacha, error, polyfill};
+use {aead, chacha, error, poly1305, polyfill};
 use core;
-
-const POLY1305_STATE_LEN: usize = 256;
-const POLY1305_KEY_LEN: usize = 32;
-
 
 /// ChaCha20-Poly1305 as described in [RFC 7539].
 ///
@@ -94,99 +90,49 @@ fn ctx_as_key(ctx: &[u64; aead::KEY_CTX_BUF_ELEMS])
         chacha::KEY_LEN_IN_BYTES / 4)
 }
 
-type UpdateFn = fn(state: &mut [u8; POLY1305_STATE_LEN], ad: &[u8],
-                   ciphertext: &[u8]);
-
-fn aead_poly1305(tag_out: &mut [u8; aead::TAG_LEN],
-                 chacha20_key: &chacha::Key, counter: &chacha::Counter,
-                 ad: &[u8], ciphertext: &[u8]) {
+fn aead_poly1305(tag_out: &mut [u8; aead::TAG_LEN], chacha20_key: &chacha::Key,
+                 counter: &chacha::Counter, ad: &[u8], ciphertext: &[u8]) {
     debug_assert_eq!(counter[0], 0);
-    let mut poly1305_key = [0u8; POLY1305_KEY_LEN];
+    let mut poly1305_key = [0u8; poly1305::KEY_LEN];
     chacha::chacha20_xor_in_place(chacha20_key, counter, &mut poly1305_key);
-    let mut ctx = [0u8; POLY1305_STATE_LEN];
-    poly1305_init(&mut ctx, &poly1305_key);
+    let mut ctx = poly1305::SigningContext::with_key(&poly1305_key);
     poly1305_update_padded_16(&mut ctx, ad);
     poly1305_update_padded_16(&mut ctx, ciphertext);
     poly1305_update_length(&mut ctx, ad.len());
     poly1305_update_length(&mut ctx, ciphertext.len());
-    poly1305_finish(&mut ctx, tag_out);
+    ctx.sign(tag_out);
 }
 
 #[inline]
-fn poly1305_update_padded_16(state: &mut [u8; POLY1305_STATE_LEN],
-                                data: &[u8]) {
-    poly1305_update(state, data);
+fn poly1305_update_padded_16(ctx: &mut poly1305::SigningContext, data: &[u8]) {
+    ctx.update(data);
     if data.len() % 16 != 0 {
         static PADDING: [u8; 16] = [0u8; 16];
-        poly1305_update(state, &PADDING[..PADDING.len() - (data.len() % 16)])
+        ctx.update(&PADDING[..PADDING.len() - (data.len() % 16)])
     }
 }
 
 /// Updates the Poly1305 context |ctx| with the 64-bit little-endian encoded
 /// length value |len|.
 #[inline]
-fn poly1305_update_length(ctx: &mut [u8; POLY1305_STATE_LEN], len: usize) {
+fn poly1305_update_length(ctx: &mut poly1305::SigningContext, len: usize) {
     let mut j = len;
     let mut length_bytes = [0u8; 8];
     for b in &mut length_bytes {
         *b = j as u8;
         j >>= 8;
     }
-    poly1305_update(ctx, &length_bytes);
+    ctx.update(&length_bytes);
 }
 
-
-#[inline(always)]
-fn poly1305_init(state: &mut [u8; POLY1305_STATE_LEN],
-                 key: &[u8; POLY1305_KEY_LEN]) {
-    unsafe {
-        GFp_poly1305_init(state, key)
-    }
-}
-
-#[inline(always)]
-fn poly1305_finish(state: &mut [u8; POLY1305_STATE_LEN],
-                   tag_out: &mut [u8; aead::TAG_LEN]) {
-    unsafe {
-        GFp_poly1305_finish(state, tag_out)
-    }
-}
-
-#[inline(always)]
-fn poly1305_update(state: &mut [u8; POLY1305_STATE_LEN], in_: &[u8]) {
-    unsafe {
-        GFp_poly1305_update(state, in_.as_ptr(), in_.len())
-    }
-}
-
-extern {
-    fn GFp_poly1305_init(state: &mut [u8; POLY1305_STATE_LEN],
-                         key: &[u8; POLY1305_KEY_LEN]);
-    fn GFp_poly1305_finish(state: &mut [u8; POLY1305_STATE_LEN],
-                           mac: &mut [u8; aead::TAG_LEN]);
-    fn GFp_poly1305_update(state: &mut [u8; POLY1305_STATE_LEN],
-                           in_: *const u8, in_len: c::size_t);
-}
 
 #[cfg(test)]
 mod tests {
-    use {aead, c};
-
-    bssl_test!(test_poly1305, bssl_poly1305_test_main);
+    use aead;
 
     #[test]
     pub fn test_chacha20_poly1305() {
         aead::tests::test_aead(&aead::CHACHA20_POLY1305,
             "crypto/cipher/test/chacha20_poly1305_tests.txt");
-    }
-
-    #[test]
-    pub fn test_poly1305_state_len() {
-        assert_eq!((super::POLY1305_STATE_LEN + 255) / 256,
-                   (unsafe { GFp_POLY1305_STATE_LEN } + 255) / 256);
-    }
-
-    extern {
-        static GFp_POLY1305_STATE_LEN: c::size_t;
     }
 }

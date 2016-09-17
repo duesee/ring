@@ -233,62 +233,37 @@ fn with_extended_buffers<F>(dest: &mut [Limb], max_exclusive: &[Limb], cb: F)
     result
 }
 
-/// Decide implementation strategy for random sampling - see `SamplingParams`.
+/// Decide implementation strategy for random sampling.
+//
+// We support a special case performance optimization for bounds of the form
+// `0b100...` - see comment in `SamplingParams`.
+//
+// However, for simplicity, we only support this for the case when the number
+// of bits in the bound (/ public key modulus) is a multiple of LIMB_BITS,
+// or one less, which we expect to be the case in performance-sensitive
+// applications, where, e.g., the 2048 or 2047-bit modulus will be the product
+// of two 1024-bit integers.
 fn select_sampling_params(max_exclusive: &[Limb]) -> SamplingParams {
-    let starts_with_0b100 = starts_with_0b100_variable_time(max_exclusive);
-    let leading_zeros = max_exclusive[max_exclusive.len() - 1].leading_zeros();
+    let most_sig = max_exclusive[max_exclusive.len() - 1];
 
-    if starts_with_0b100 && leading_zeros == 0 {
+    if most_sig >> (LIMB_BITS - 3) == 0b100 {
         SamplingParams {
-            most_sig_limb_mask: 1, // effectively a carry into a new, more-significant limb
+            most_sig_limb_mask: 1, // effectively a carry over into a new, more-significant limb
             reduce_when_over_bound: true,
             extend_limbs_by_one: true,
         }
-    } else if starts_with_0b100 {
+    } else if most_sig >> (LIMB_BITS - 4) == 0b0100 {
         SamplingParams {
-            most_sig_limb_mask: Limb::max_value() >> (leading_zeros - 1),
+            most_sig_limb_mask: Limb::max_value(),
             reduce_when_over_bound: true,
             extend_limbs_by_one: false,
         }
     } else {
         SamplingParams {
-            most_sig_limb_mask: Limb::max_value() >> leading_zeros,
+            most_sig_limb_mask: Limb::max_value() >> most_sig.leading_zeros(),
             reduce_when_over_bound: false,
             extend_limbs_by_one: false,
         }
-    }
-}
-
-/// Does integer represented by limbs start with `0b100...`?
-fn starts_with_0b100_variable_time(limbs: &[Limb]) -> bool {
-    debug_assert!(limbs.len() > 0);
-
-    let most_sig_limb = limbs[limbs.len() - 1];
-    let next_limb = if limbs.len() > 1 {
-        Some(limbs[limbs.len() - 2])
-    } else {
-        None
-    };
-
-    debug_assert!(most_sig_limb > 0);
-
-    match most_sig_limb {
-        4 => true,
-        3 => false,
-        2 => match next_limb {
-            None => false,
-            Some(l) => { l < (1 << (LIMB_BITS - 1)) },
-        },
-        1 => match next_limb {
-            None => false,
-            Some(l) => { l < (1 << (LIMB_BITS - 2)) },
-        },
-        _ => {
-            // TODO(DJ) Eliminate `as`
-            let used_bits = LIMB_BITS - (most_sig_limb.leading_zeros() as usize);
-            let most_sig_bit = 1 << (used_bits - 1);
-            most_sig_limb - most_sig_bit < most_sig_bit >> 2
-        },
     }
 }
 
@@ -301,67 +276,63 @@ mod tests {
     fn test_select_sampling_params() {
         use super::select_sampling_params;
 
+        let starting_with_0b100 = &[
+            1 << (LIMB_BITS - 1),
+            1 << (LIMB_BITS - 1) | 1,
+            (1 << (LIMB_BITS - 1)) | (1 << LIMB_BITS - 4),
+            (1 << (LIMB_BITS - 1)) | (Limb::max_value() >> 3),
+        ];
+
+        for l in starting_with_0b100 {
+            let x = [*l];
+            let p = select_sampling_params(&x[..]);
+            assert!(p.extend_limbs_by_one);
+            assert!(p.reduce_when_over_bound);
+            assert_eq!(1, p.most_sig_limb_mask);
+        }
+
+        let starting_with_0b0100 = &[
+            1 << (LIMB_BITS - 2),
+            1 << (LIMB_BITS - 2) | 1,
+            (1 << (LIMB_BITS - 2)) | (1 << LIMB_BITS - 5),
+            (1 << (LIMB_BITS - 2)) | (Limb::max_value() >> 4),
+        ];
+
+        for l in starting_with_0b0100 {
+            let x = [*l];
+            let p = select_sampling_params(&x[..]);
+            assert!(!p.extend_limbs_by_one);
+            assert!(p.reduce_when_over_bound);
+            assert_eq!(Limb::max_value(), p.most_sig_limb_mask);
+        }
+
+        macro_rules! assert_normal {
+            ($i:expr, $l:expr) => {
+                {
+                    let x = [$l];
+                    let p = select_sampling_params(&x[..]);
+                    let mask = Limb::max_value() >> (LIMB_BITS - 1 - $i);
+                    assert!(!p.extend_limbs_by_one);
+                    assert!(!p.reduce_when_over_bound);
+                    assert_eq!(mask, p.most_sig_limb_mask);
+                }
+            }
+        }
+
+        for i in 0..(LIMB_BITS - 2) {
+            let l = 1 << i;
+
+            assert_normal!(i, l);
+            assert_normal!(i, l | 1);
+            assert_normal!(i, l | l >> 3);
+        }
+
         for i in 0..LIMB_BITS {
-            let x = 1 << i;
+            let l = 1 << i;
 
-            let covering_mask = if i == LIMB_BITS - 1 {
-                Limb::max_value()
-            } else {
-                (1 << (i + 1)) - 1
-            };
-
-            macro_rules! assert_uses_covering_mask {
-                ( $b:expr ) => {
-                    {
-                        let p = select_sampling_params($b);
-                        assert!(!p.reduce_when_over_bound, "for {:b}", x);
-                        assert_eq!(covering_mask, p.most_sig_limb_mask);
-                        assert!(!p.extend_limbs_by_one, "for: {:b}", x);
-                    }
-                }
-            };
-
-            macro_rules! assert_uses_extra_bit_mask_when_x_gte {
-                ( $gte:expr, $b:expr ) => {
-                    {
-                        let extra_bit_available = covering_mask.count_zeros() > 0;
-                        let extra_bit_mask = if extra_bit_available {
-                            (covering_mask << 1) | 1
-                        } else {
-                            1
-                        };
-
-                        let p = select_sampling_params($b);
-                        if x >= $gte {
-                            assert!(p.reduce_when_over_bound, "for {:b}", x);
-                            assert_eq!(extra_bit_mask, p.most_sig_limb_mask);
-                            assert_eq!(!extra_bit_available, p.extend_limbs_by_one);
-                        } else {
-                            assert!(!p.reduce_when_over_bound, "for {:b}", x);
-                            assert_eq!(covering_mask, p.most_sig_limb_mask);
-                            assert!(!p.extend_limbs_by_one, "for: {:b}", x);
-                        }
-                    }
-                }
-            };
-
-            let b = &[x];
-            assert_uses_extra_bit_mask_when_x_gte!(0b100, b);
-
-            let b = &[(x | 1)];
-            assert_uses_extra_bit_mask_when_x_gte!(0b1000, b);
-
-            let b = &[(x | x >> 1)];
-            assert_uses_covering_mask!(b);
-
-            let b = &[(x | x >> 2)];
-            assert_uses_covering_mask!(b);
-
-            let b = &[(x | x >> 3)];
-            assert_uses_extra_bit_mask_when_x_gte!(0b100, b);
-
-            let b = &[covering_mask];
-            assert_uses_covering_mask!(b);
+            assert_normal!(i, l | l >> 1);
+            assert_normal!(i, l | l >> 2);
+            assert_normal!(i, Limb::max_value() >> (LIMB_BITS - 1 - i));
         }
     }
 
@@ -532,36 +503,6 @@ mod tests {
             range.sample_into_limbs(&mut result, &rng).unwrap();
             assert_eq!(&max_exclusive_minus_1, &result);
         }
-    }
-
-    #[test]
-    fn test_starts_with_0b100() {
-        use super::starts_with_0b100_variable_time;
-
-        assert!(!starts_with_0b100_variable_time(&[1]));
-        assert!(!starts_with_0b100_variable_time(&[2]));
-        assert!(!starts_with_0b100_variable_time(&[3]));
-        assert!(starts_with_0b100_variable_time(&[4]));
-        assert!(!starts_with_0b100_variable_time(&[5]));
-        assert!(!starts_with_0b100_variable_time(&[6]));
-        assert!(!starts_with_0b100_variable_time(&[7]));
-        assert!(starts_with_0b100_variable_time(&[8]));
-        assert!(starts_with_0b100_variable_time(&[9]));
-        assert!(!starts_with_0b100_variable_time(&[10]));
-
-        assert!(starts_with_0b100_variable_time(&[0, 1]));
-        assert!(starts_with_0b100_variable_time(&[Limb::max_value() >> 2, 1]));
-        assert!(!starts_with_0b100_variable_time(&[Limb::max_value() >> 1, 1]));
-        assert!(starts_with_0b100_variable_time(&[Limb::max_value() >> 1, 2]));
-        assert!(!starts_with_0b100_variable_time(&[Limb::max_value(), 2]));
-        assert!(!starts_with_0b100_variable_time(&[Limb::max_value() >> 1, 3]));
-        assert!(starts_with_0b100_variable_time(&[Limb::max_value(), 4]));
-        assert!(!starts_with_0b100_variable_time(&[0, 5]));
-        assert!(!starts_with_0b100_variable_time(&[0, 6]));
-        assert!(!starts_with_0b100_variable_time(&[0, 7]));
-        assert!(starts_with_0b100_variable_time(&[0, 8]));
-        assert!(starts_with_0b100_variable_time(&[0, 9]));
-        assert!(!starts_with_0b100_variable_time(&[0, 10]));
     }
 }
 

@@ -221,13 +221,13 @@ fn with_extended_buffers<F>(dest: &mut [Limb], max_exclusive: &[Limb], cb: F)
     let mut tmp_dest: [Limb; BUF_SIZE] = [0; BUF_SIZE];
 
     tmp_dest[..dest.len()].copy_from_slice(&dest);
-    tmp_max[..max_exclusive.len()].clone_from_slice(&max_exclusive);
+    tmp_max[..max_exclusive.len()].copy_from_slice(&max_exclusive);
 
     let result = cb(&mut tmp_dest[..buf_needed], &tmp_max[..buf_needed]);
 
     if result.is_ok() {
         let dest_len = dest.len();
-        dest.clone_from_slice(&tmp_dest[..dest_len]);
+        dest.copy_from_slice(&tmp_dest[..dest_len]);
     }
 
     result

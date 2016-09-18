@@ -143,6 +143,9 @@ pub mod rand;
 
 mod limb;
 
+#[path = "protocols/protocols.rs"]
+pub mod protocols;
+
 // Really a private method; only has public visibility so that C compilation
 // can see it.
 #[doc(hidden)]

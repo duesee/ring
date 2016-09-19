@@ -179,58 +179,32 @@ pub unsafe extern fn GFp_rand_mod(dest: *mut Limb, max_exclusive: *const Limb,
 
 /// Chooses a positive integer less than `max_exclusive` uniformly at random
 /// and stores it into `dest`.
-fn set_to_rand_mod(dest: &mut [Limb], max_exclusive: &[Limb], rng: &rand::SecureRandom)
-            -> Result<(), error::Unspecified> {
-
+fn set_to_rand_mod(dest: &mut [Limb], max_exclusive: &[Limb],
+                   rng: &rand::SecureRandom)
+                   -> Result<(), error::Unspecified> {
     debug_assert_eq!(dest.len(), max_exclusive.len());
 
     let sampling_params = select_sampling_params(max_exclusive);
 
-    if sampling_params.extend_limbs_by_one {
-        with_extended_buffers(dest, max_exclusive, |ext_dest, ext_max| {
-            let range = Range {
-                max_exclusive: ext_max,
-                sampling_params: &sampling_params,
-            };
-            range.sample_into_limbs(ext_dest, rng)
-        })
-    } else {
-        let range = Range {
-            max_exclusive: max_exclusive,
-            sampling_params: &sampling_params,
-        };
-        range.sample_into_limbs(dest, rng)
-    }
-}
-
-/// Copy `dest` and `max_exclusive` into temporary buffers which extend capacity
-/// by one, pass those to the callback, then copy the modified destination
-/// buffer back to `dest`.
-fn with_extended_buffers<F>(dest: &mut [Limb], max_exclusive: &[Limb], cb: F)
-                            -> Result<(), error::Unspecified>
-                            where F: Fn(&mut [Limb], &[Limb])
-                                     -> Result<(), error::Unspecified> {
-    const BUF_SIZE: usize = RSA_KEY_MAX_LIMBS + 1;
-
-    let buf_needed = dest.len() + 1;
-    debug_assert_eq!(buf_needed, max_exclusive.len() + 1); // equivalent definition
-
-    assert!(buf_needed <= BUF_SIZE);
-
-    let mut tmp_max: [Limb; BUF_SIZE] = [0; BUF_SIZE];
-    let mut tmp_dest: [Limb; BUF_SIZE] = [0; BUF_SIZE];
-
+    // Make a copy of `dest` and `max_exclusive` to handle the case where we
+    // need to extend them by an extra limb.
+    let mut tmp_dest = [0; RSA_KEY_MAX_LIMBS + 1];
     tmp_dest[..dest.len()].copy_from_slice(&dest);
+    let mut tmp_max = [0; RSA_KEY_MAX_LIMBS + 1];
     tmp_max[..max_exclusive.len()].copy_from_slice(&max_exclusive);
+    let extra_limb = if sampling_params.extend_limbs_by_one { 1 } else { 0 };
 
-    let result = cb(&mut tmp_dest[..buf_needed], &tmp_max[..buf_needed]);
+    let range = Range {
+        max_exclusive: &tmp_max[..(max_exclusive.len() + extra_limb)],
+        sampling_params: &sampling_params,
+    };
+    try!(range.sample_into_limbs(&mut tmp_dest[..dest.len() + extra_limb],
+                                 rng));
 
-    if result.is_ok() {
-        let dest_len = dest.len();
-        dest.copy_from_slice(&tmp_dest[..dest_len]);
-    }
+    let dest_len = dest.len();
+    dest.copy_from_slice(&tmp_dest[..dest_len]);
 
-    result
+    Ok(())
 }
 
 /// Decide implementation strategy for random sampling.
